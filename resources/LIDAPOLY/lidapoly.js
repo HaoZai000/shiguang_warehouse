@@ -1,8 +1,10 @@
 // 上海立达学院 (lidapoly.edu.cn) 拾光课程表适配脚本
-// 强智教务 jsxsd，课表页 xskb_list.do 在框架 iframe 内，导入前请先在页面上切换好学期
+// 强智教务 jsxsd，课表与校历均通过接口请求 HTML 解析，不依赖当前页面：
+//   课表 GET /shldzyjsxy_jsxsd/xskb/xskb_list.do?xnxq01id=<学期>
+//   校历 POST /shldzyjsxy_jsxsd/jxzl/jxzl_query (xnxq01id)
 // #kbtable 每大节一行、每天一格；详情 div (class kbcontent) 含 课名[学分][性质] / 老师 /
-// 班级(其内文本含 `周次(全部)[节次]`) / 上课地点；同一课程会重复出现在覆盖的多个大节行，需去重
-// 校历：POST jxzl_query(xnxq01id) → #kbtable 行 td[0]=周次、td[1].title=该周周一日期
+// 班级(其内文本含 `周次(全部)[节次]`) / 上课地点；同一课程重复出现在覆盖的多个大节行，需去重
+// 校历 #kbtable 行 td[0]=周次、td[1].title=该周周一日期
 
 const LIDAPOLY_TIME_SLOTS = [
     { number: 1, startTime: "08:30", endTime: "09:10" },
@@ -84,27 +86,27 @@ function parseDetailDiv(div, day) {
     };
 }
 
-// 在当前文档与各级 frame 中查找课表页文档（#kbtable）
-function findScheduleDoc(doc) {
-    if (doc.querySelector("#kbtable div.kbcontent")) return doc;
-    for (const frame of doc.querySelectorAll("iframe,frame")) {
-        try {
-            const found = findScheduleDoc(frame.contentDocument);
-            if (found) return found;
-        } catch (e) {
-            // 跨域 frame 取不到 contentDocument，跳过
-        }
-    }
-    return null;
+// 请求课表页 HTML（不带参数时为系统默认学期）
+async function fetchScheduleDoc(semesterId) {
+    let url = "/shldzyjsxy_jsxsd/xskb/xskb_list.do";
+    if (semesterId) url += "?xnxq01id=" + encodeURIComponent(semesterId);
+    const resp = await fetch(url, { method: "GET", credentials: "include" });
+    if (!resp.ok) throw new Error("课表请求失败（HTTP " + resp.status + "）");
+    return new DOMParser().parseFromString(await resp.text(), "text/html");
 }
 
-// 课表页学年学期下拉的选中值（如 2026-2027-1）
-function readSemesterId(doc) {
+// 课表页学年学期下拉：全部选项 + 选中项
+function readSemesterOptions(doc) {
     const sel = doc.querySelector("#xnxq01id");
     if (!sel) return null;
-    const opt = sel.selectedOptions && sel.selectedOptions[0];
-    const value = opt ? String(opt.value).trim() : "";
-    return /^\d{4}-\d{4}-\d$/.test(value) ? value : null;
+    const options = Array.from(sel.options)
+        .map(opt => String(opt.value).trim())
+        .filter(value => /^\d{4}-\d{4}-\d$/.test(value));
+    if (options.length === 0) return null;
+    const selectedValue = sel.selectedOptions && sel.selectedOptions[0]
+        ? String(sel.selectedOptions[0].value).trim() : "";
+    const defaultIndex = Math.max(0, options.indexOf(selectedValue));
+    return { options, defaultIndex };
 }
 
 // 从课表页 #kbtable 解析课程，同一课程重复出现在多个大节行需去重
@@ -166,46 +168,48 @@ async function fetchSemesterConfig(semesterId) {
 async function runImportFlow() {
     const confirmed = await window.shiguangBridgePromise.showAlert(
         "教务系统课表导入",
-        "导入前请先在课表页切换到要导入的学期，再点击导入",
+        "导入前请确保您已在浏览器中成功登录上海立达学院教务系统",
         "好的，开始导入");
     if (!confirmed) { window.shiguangBridge.showToast("用户取消了导入。"); return; }
 
-    const doc = findScheduleDoc(document);
-    if (!doc) {
-        window.shiguangBridge.showToast("导入失败：未找到课表，请确认已打开学期理论课表页面。");
-        return;
-    }
-
-    const semesterId = readSemesterId(doc);
-    if (!semesterId) {
-        window.shiguangBridge.showToast("导入失败：未读取到当前学年学期，请确认在学期理论课表页面。");
-        return;
-    }
-
-    const courses = parseCourses(doc);
-    if (courses.length === 0) {
-        window.shiguangBridge.showToast("未解析到课程，请确认课表已加载。");
-        return;
-    }
-
-    const config = await fetchSemesterConfig(semesterId);
-
     try {
+        window.shiguangBridge.showToast("正在请求课表数据...");
+
+        // 第一次请求不带学期，拿默认学期的课表页（含学期下拉列表）
+        const defaultDoc = await fetchScheduleDoc(null);
+        const semesterOptions = readSemesterOptions(defaultDoc);
+        if (!semesterOptions) throw new Error("未能读取学期列表，请确认已登录教务系统。");
+
+        const index = await window.shiguangBridgePromise.showSingleSelection(
+            "选择学期", JSON.stringify(semesterOptions.options), semesterOptions.defaultIndex);
+        if (index === null || index === -1) { window.shiguangBridge.showToast("用户取消了导入。"); return; }
+        const semesterId = semesterOptions.options[index];
+
+        // 若所选学期即默认学期，直接复用第一次结果；否则带参数重新请求
+        const selectedDoc = semesterId === semesterOptions.options[semesterOptions.defaultIndex]
+            ? defaultDoc
+            : await fetchScheduleDoc(semesterId);
+
+        const courses = parseCourses(selectedDoc);
+        if (courses.length === 0) throw new Error("未解析到课程，请确认所选学期有课。");
+
+        const config = await fetchSemesterConfig(semesterId);
+
         await window.shiguangBridgePromise.saveImportedCourses(JSON.stringify(courses));
+
+        if (config) {
+            try { await window.shiguangBridgePromise.saveCourseConfig(JSON.stringify(config)); } catch (e) {}
+        } else {
+            window.shiguangBridge.showToast("未取到开学日期，已跳过课表配置，请在应用内手动设置。");
+        }
+        try { await window.shiguangBridgePromise.savePresetTimeSlots(JSON.stringify(LIDAPOLY_TIME_SLOTS)); } catch (e) {}
+
+        window.shiguangBridge.showToast("课程导入成功，共导入 " + courses.length + " 门课程！");
+        window.shiguangBridge.notifyTaskCompletion();
     } catch (e) {
-        window.shiguangBridge.showToast("课程保存失败: " + e.message);
-        return;
+        window.shiguangBridge.showToast("导入失败：" + e.message);
+        console.error("JS: Import Error", e);
     }
-
-    if (config) {
-        try { await window.shiguangBridgePromise.saveCourseConfig(JSON.stringify(config)); } catch (e) {}
-    } else {
-        window.shiguangBridge.showToast("未取到开学日期，已跳过课表配置，请在应用内手动设置。");
-    }
-    try { await window.shiguangBridgePromise.savePresetTimeSlots(JSON.stringify(LIDAPOLY_TIME_SLOTS)); } catch (e) {}
-
-    window.shiguangBridge.showToast("课程导入成功，共导入 " + courses.length + " 门课程！");
-    window.shiguangBridge.notifyTaskCompletion();
 }
 
 runImportFlow();
