@@ -20,16 +20,25 @@ const SWFU_TIME_SLOTS = [
     { number: 12, startTime: "21:15", endTime: "22:00" }
 ];
 
-// 周次："1-8周" / "第9周" / "9-16周"
+// 周次："1-8周" / "第9周" / "9-16周(单)" / "9-16周(双)"，单双周取奇偶
 function parseWeeks(weekStr) {
     if (!weekStr) return [];
+    const text = String(weekStr);
+    const keepOdd = text.includes("(单)");
+    const keepEven = text.includes("(双)");
     const weeks = [];
-    const range = String(weekStr).match(/(\d+)-(\d+)/);
+    const range = text.match(/(\d+)-(\d+)/);
+    const list = [];
     if (range) {
-        for (let w = Number(range[1]); w <= Number(range[2]); w++) weeks.push(w);
+        for (let w = Number(range[1]); w <= Number(range[2]); w++) list.push(w);
     } else {
-        const single = String(weekStr).match(/(\d+)/);
-        if (single) weeks.push(Number(single[1]));
+        const single = text.match(/(\d+)/);
+        if (single) list.push(Number(single[1]));
+    }
+    for (const w of list) {
+        if (keepOdd && w % 2 === 0) continue;
+        if (keepEven && w % 2 !== 0) continue;
+        weeks.push(w);
     }
     return weeks;
 }
