@@ -1,9 +1,8 @@
 // 西南林业大学 (swfu.edu.cn) 拾光课程表适配脚本
 // 正方教务 V9，接口：
-//   学年学期 GET /jwglxt/kbcx/xskbcx_cxXskbcxIndex.html?gnmkdm=N2151
-//   课表     POST /jwglxt/kbcx/xskbcx_cxXsgrkb.html?gnmkdm=N2151  xnm=&xqm=3&kzlx=ck&xsdm=&kclbdm=&kclxdm=
-//   校历     POST /jwglxt/kbcx/xskbcxZccx_cxZcByXnxq.html?gnmkdm=N2154  xnm=&xqm=   (rq/zs 字段)
-// zcd 形态：1-8周 / 第9周 / 9-16周（无单双周）；qsxqj=1 周一起始
+// 学年学期 GET /jwglxt/kbcx/xskbcx_cxXskbcxIndex.html?gnmkdm=N2151
+// 课表 POST /jwglxt/kbcx/xskbcx_cxXsgrkb.html?gnmkdm=N2151  xnm=&xqm=3&kzlx=ck&xsdm=&kclbdm=&kclxdm=
+// 校历 POST /jwglxt/kbcx/xskbcxZccx_cxZcByXnxq.html?gnmkdm=N2154  xnm=&xqm=   (rq/zs 字段)
 
 const SWFU_TIME_SLOTS = [
     { number: 1, startTime: "08:20", endTime: "09:05" },
@@ -20,36 +19,53 @@ const SWFU_TIME_SLOTS = [
     { number: 12, startTime: "21:15", endTime: "22:00" }
 ];
 
-// 周次："1-8周" / "第9周" / "9-16周(单)" / "9-16周(双)" / "1-8周(单),9-16周(双)"
-// 正方按逗号分段，单双标记是段内标记，逐段各自判断
+//解析周次字符串，处理单双周和周次范围
 function parseWeeks(weekStr) {
     if (!weekStr) return [];
+
+    const cleaned = weekStr
+        .replace(/周数[:：]/g, '')
+        .replace(/第/g, '')
+        .replace(/周/g, '')
+        .replace(/共\s*\d+\s*.*$/g, '');
+
+    const segments = cleaned.split(/[,，、;；]/);
+
     const weeks = [];
-    for (const set of String(weekStr).split(",")) {
-        const seg = set.trim();
-        const range = seg.match(/(\d+)-(\d+)周/);
-        const single = seg.match(/(\d+)周/);
-        let start = 0;
-        let end = 0;
-        if (range) {
-            start = Number(range[1]);
-            end = Number(range[2]);
-        } else if (single) {
-            start = end = Number(single[1]);
-        } else {
-            continue;
-        }
-        const isOdd = seg.includes("(单)");
-        const isEven = seg.includes("(双)");
-        for (let w = start; w <= end; w++) {
-            if (isOdd && w % 2 === 0) continue;
-            if (isEven && w % 2 !== 0) continue;
-            weeks.push(w);
+    const segRegex = /(\d+)(?:\s*[-~]\s*(\d+))?\s*(?:[（(]?\s*([单双])\s*周?\s*[)）]?)?/g;
+
+    for (const seg of segments) {
+        const s = seg.trim();
+        if (!s) continue;
+
+        segRegex.lastIndex = 0;
+        let m;
+        while ((m = segRegex.exec(s)) !== null) {
+            if (m[0] === '') {
+                segRegex.lastIndex++;
+                continue;
+            }
+
+            const start = parseInt(m[1], 10);
+            const end = m[2] ? parseInt(m[2], 10) : start;
+            const flagStr = m[3] || '';
+
+            let flag = 0;
+            if (flagStr.includes('单')) flag = 1;
+            else if (flagStr.includes('双')) flag = 2;
+
+            for (let w = start; w <= end; w++) {
+                if (flag === 1 && w % 2 === 0) continue;
+                if (flag === 2 && w % 2 !== 0) continue;
+                weeks.push(w);
+            }
         }
     }
+
     return [...new Set(weeks)].sort((a, b) => a - b);
 }
 
+// 解析 API 返回的 JSON 数据
 function parseJsonData(jsonData) {
     if (!jsonData || !Array.isArray(jsonData.kbList)) return [];
     const courses = [];
