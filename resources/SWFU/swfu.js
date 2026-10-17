@@ -20,27 +20,34 @@ const SWFU_TIME_SLOTS = [
     { number: 12, startTime: "21:15", endTime: "22:00" }
 ];
 
-// 周次："1-8周" / "第9周" / "9-16周(单)" / "9-16周(双)"，单双周取奇偶
+// 周次："1-8周" / "第9周" / "9-16周(单)" / "9-16周(双)" / "1-8周(单),9-16周(双)"
+// 正方按逗号分段，单双标记是段内标记，逐段各自判断
 function parseWeeks(weekStr) {
     if (!weekStr) return [];
-    const text = String(weekStr);
-    const keepOdd = text.includes("(单)");
-    const keepEven = text.includes("(双)");
     const weeks = [];
-    const range = text.match(/(\d+)-(\d+)/);
-    const list = [];
-    if (range) {
-        for (let w = Number(range[1]); w <= Number(range[2]); w++) list.push(w);
-    } else {
-        const single = text.match(/(\d+)/);
-        if (single) list.push(Number(single[1]));
+    for (const set of String(weekStr).split(",")) {
+        const seg = set.trim();
+        const range = seg.match(/(\d+)-(\d+)周/);
+        const single = seg.match(/(\d+)周/);
+        let start = 0;
+        let end = 0;
+        if (range) {
+            start = Number(range[1]);
+            end = Number(range[2]);
+        } else if (single) {
+            start = end = Number(single[1]);
+        } else {
+            continue;
+        }
+        const isOdd = seg.includes("(单)");
+        const isEven = seg.includes("(双)");
+        for (let w = start; w <= end; w++) {
+            if (isOdd && w % 2 === 0) continue;
+            if (isEven && w % 2 !== 0) continue;
+            weeks.push(w);
+        }
     }
-    for (const w of list) {
-        if (keepOdd && w % 2 === 0) continue;
-        if (keepEven && w % 2 !== 0) continue;
-        weeks.push(w);
-    }
-    return weeks;
+    return [...new Set(weeks)].sort((a, b) => a - b);
 }
 
 function parseJsonData(jsonData) {
