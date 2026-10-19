@@ -1,7 +1,6 @@
 // 广东交通职业技术学院（gdcp.edu.cn）拾光课程表适配脚本（自动判定校区作息版）
 // 接口与作息数据参考同目录 gdcp_01.js（作者：小漫君），本适配不再让用户选择校区。
 // 适配作者：Haooz
-// 登录后进入“新教务系统”（jw.gdcp.edu.cn）再执行导入。
 // 课表：GET /jsxsd/xskb/xskb_list.do 读学期下拉与节次模式；POST 同路径取整学期详表（div.kbcontent）。
 // 周历：POST /jsxsd/jxzl/jxzl_query 读首周日期与总周数。
 // 作息：按教学楼自动判断校区；校区有两套作息时，课程较多的一套写入预设作息，较少的一套按自定义时间写入。
@@ -367,8 +366,7 @@ async function runImportFlow() {
     try {
         if (window.location.origin !== GDCP_ORIGIN) {
             await window.shiguangBridgePromise.showAlert(
-                '请进入新教务系统',
-                '请先登录融合门户，打开“新教务系统”后再导入。',
+                '请先登录教务系统后再执行导入。',
                 '知道了'
             );
             return;
