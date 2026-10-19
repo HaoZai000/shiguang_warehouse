@@ -366,6 +366,7 @@ async function runImportFlow() {
     try {
         if (window.location.origin !== GDCP_ORIGIN) {
             await window.shiguangBridgePromise.showAlert(
+                '请先登录教务系统',
                 '请先登录教务系统后再执行导入。',
                 '知道了'
             );
